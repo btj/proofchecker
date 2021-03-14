@@ -11,13 +11,13 @@ def is_alpha(c):
 def is_digit(c):
     return '0' <= c and c <= '9'
 
-operators = {'==', '<=', '<', '+', '-', '#'}
+operators = {'==', '<=', '<', '+', '-', '#', '(', ')', ',', '==>', ':'}
 operatorPrefixes = set()
 for operator in operators:
     for i in range(1,len(operator) + 1):
         operatorPrefixes.add(operator[:i])
 
-keywords = ['assert', 'and', 'True', 'Herschrijven', 'met', 'in', 'Z', 'op']
+keywords = ['assert', 'and', 'True', 'Herschrijven', 'met', 'in', 'Z', 'op', 'Wet']
 
 class Lexer:
     def __init__(self, text):
@@ -103,6 +103,16 @@ class Parser:
     def parsePrimaryExpression(self):
         if self.tokenType == 'identifier':
             x = self.eat()
+            if self.tokenType == '(':
+                self.eat()
+                args = []
+                if self.tokenType != ')':
+                    args.append(self.parseExpression())
+                    while self.tokenType == ',':
+                        self.eat()
+                        args.append(self.parseExpression())
+                self.expect(')')
+                return 'call', x, tuple(args)
             return 'var', x
         elif self.tokenType == 'number':
             v = int(self.eat())
@@ -148,18 +158,28 @@ class Parser:
             self.parseError('%s expected, found %s' % (tokenType, self.tokenType))
         return self.eat()
 
-    def parseProposition(self):
+    def parseConjunction(self):
         e = self.parseComparison()
         while self.tokenType == 'and':
             self.eat()
-            e2 = self.parseProposition()
+            e2 = self.parseConjunction()
             e = ('and', e, e2)
         return e
+
+    def parseImplication(self):
+        e = self.parseConjunction()
+        if self.tokenType == '==>':
+            self.eat()
+            return ('==>', e, self.parseImplication())
+        return e
+
+    def parseExpression(self):
+        return self.parseImplication()
 
     def parseProofLine(self):
         line, _ = self.tokenLoc
         self.expect('assert')
-        e = self.parseProposition()
+        e = self.parseConjunction()
         if self.tokenType == '#':
             self.eat()
             if self.tokenType == 'Herschrijven':
@@ -176,6 +196,14 @@ class Parser:
                     self.eat()
                     i = int(self.expect('number'))
                 justification = ('Z', i)
+            elif self.tokenType == 'identifier':
+                lawName = self.eat()
+                self.expect('op')
+                indices = [int(self.expect('number'))]
+                while self.tokenType == ',':
+                    self.eat()
+                    indices.append(int(self.expect('number')))
+                justification = ('law', lawName, tuple(indices))
             else:
                 self.error('Justification keyword not supported')
         else:
@@ -190,6 +218,15 @@ class Parser:
         while self.tokenType == 'assert':
             lines.append(self.parseProofLine())
         return lines
+
+    def parseLaw(self):
+        self.expect('#')
+        self.expect('Wet')
+        name = self.expect('identifier')
+        self.expect(':')
+        rule = self.parseImplication()
+        self.expect('EOL')
+        return (name, rule)
 
 def get_rewrites(e, lhs, rhs):
     rewrites = [e] # e itself is a rewrite of itself
@@ -298,6 +335,53 @@ def follows_in_Z_from(consequent, antecedent):
         return (c2, poly2) == (c1, poly1)
     return poly2 == poly1 and c1 <= c2
 
+def match(bindings, e1, e2):
+    """
+    Extends the bindings so that subst(bindings, e1) == e2, or raises a ProofError.
+    """
+    if e1[0] == 'var':
+        x = e1[1]
+        if x in bindings:
+            if e2 != bindings[x]:
+                raise ProofError("Match failure: expected: %s; found: %s" % (bindings[x], e2))
+        else:
+            bindings[x] = e2
+    else:
+        if e1[0] != e2[0]:
+            raise ProofError("Match failure: %s is not of the form %s" % (e2, e1))
+        if e1[0] in {'==>', 'and', '==', '<=', '<', '+', '-'}:
+            match(bindings, e1[1], e2[1])
+            match(bindings, e1[2], e2[2])
+        elif e1[0] == 'call':
+            if e1[1] != e2[1]:
+                raise ProofError("Match failure: %s is not of the form %s" % (e2, e1))
+            for arg1, arg2 in zip(e1[2], e2[2]):
+                match(bindings, arg1, arg2)
+        elif e1[0] == 'number':
+            if e1 != e2:
+                raise ProofError("Match failure: expected: %s; found: %s" % (e1, e2))
+        else:
+            raise ProofError("match: construct not supported: %s" % e1)
+
+def subst(e, bindings):
+    if e[0] == 'var':
+        return bindings[e[1]]
+    elif e[0] in {'==>', 'and', '==', '<=', '<', '+', '-'}:
+        return (e[0], subst(e[1], bindings), subst(e[2], bindings))
+    elif e[0] == 'call':
+        return ('call', e[1], tuple(map(lambda arg: subst(arg, bindings), e[2])))
+    elif e[0] == 'number':
+        return e
+    else:
+        raise ProofError("subst: construct not supported: %s" % (e,))
+
+def normalize(eq):
+    if eq[0] == '==' and eq[2] < eq[1]:
+        return ('==', eq[2], eq[1])
+    return eq
+
+laws = {}
+
 def check_entailment(line, antecedent, consequent, justification):
     def get_conjunct(i):
         if i < 1 or len(antecedent) < i:
@@ -326,8 +410,24 @@ def check_entailment(line, antecedent, consequent, justification):
             for conjunct in consequent:
                 if not (conjunct in antecedent or follows_in_Z_from(conjunct, antecedent_conjunct)):
                     raise ProofError("Conjunct niet bewezen: " + str(conjunct))
-
-
+    elif justification[0] == 'law':
+        _, lawName, indices = justification
+        rule = laws[lawName]
+        conclusion = rule
+        premisses = []
+        while conclusion[0] == '==>':
+            premisses.append(conclusion[1])
+            conclusion = conclusion[2]
+        if len(indices) != len(premisses):
+            raise ProofError("Verantwoording: verwacht %d conjunct-indices; slechts %d gegeven" % (len(premisses), len(indices)))
+        variableBindings = {}
+        for premiss, i in zip(premisses, indices):
+            match(variableBindings, premiss, get_conjunct(i))
+        instantiatedConclusion = subst(conclusion, variableBindings)
+        print('Instantiated conclusion: ', instantiatedConclusion)
+        for conjunct in consequent:
+            if not (conjunct in antecedent or normalize(conjunct) == normalize(instantiatedConclusion)):
+                raise ProofError("Conjunct niet bewezen: " + str(conjunct))
     else:
         raise ProofError("Verantwoording niet ondersteund: " + str(justification))
 
@@ -355,6 +455,13 @@ assert 1 <= i + 1 # Herschrijven met 1 in 2
 
 assert i <= n and i < n
 assert i + 1 <= n # Z op 2
+
+# Wet Max1: y <= x ==> max(x, y) == x
+# Wet Max2: x <= y ==> max(x, y) == y
+
+assert True and x < y
+assert x <= y # Z op 2
+assert y == max(x, y) # Max2 op 1
 '''
 lexer = Lexer(text)
 while True:
@@ -365,6 +472,12 @@ while True:
 
 parser = Parser(text)
 while parser.tokenType != 'EOF':
-    proof = parser.parseProof()
-    print(proof)
-    checkProof(proof)
+    if parser.tokenType == 'EOL':
+        parser.eat()
+    elif parser.tokenType == '#':
+        name, rule = parser.parseLaw()
+        laws[name] = rule
+    else:
+        proof = parser.parseProof()
+        print(proof)
+        checkProof(proof)
