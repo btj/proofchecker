@@ -19,6 +19,12 @@ for operator in operators:
 
 keywords = ['assert', 'and', 'True', 'Herschrijven', 'met', 'in', 'Z', 'op', 'Wet', 'not', 'en', 'if', 'else']
 
+binaryOperators = {'==>', 'and', '==', '<=', '<', '+', '-'}
+symmetricBinaryOperators = {'and', '==', '+'}
+
+unaryOperators = {'not'}
+nullaryOperators = {'True'}
+
 class Lexer:
     def __init__(self, text):
         self.text = text
@@ -198,16 +204,34 @@ class Parser:
     def parseExpression(self):
         return self.parseImplication()
 
+    def parseFactSpec(self):
+        if self.tokenType == '(':
+            self.eat()
+            result = self.parseFactSpec()
+            self.expect(')')
+            return result
+        elif self.tokenType == 'number':
+            return ('antecedent', int(self.eat()))
+        lawName = self.expect('identifier')
+        arguments = []
+        if self.tokenType == 'op':
+            self.eat()
+            arguments.append(self.parseFactSpec())
+            while self.tokenType == ',' or self.tokenType == 'en':
+                self.eat()
+                arguments.append(self.parseFactSpec())
+        return ('law', lawName, tuple(arguments))
+
     def parseProofLine(self):
         line, _ = self.tokenLoc
         self.expect('assert')
-        e = self.parseConjunction()
+        e = self.parseExpression()
         if self.tokenType == '#':
             self.eat()
             if self.tokenType == 'Herschrijven':
                 self.eat()
                 self.expect('met')
-                i = int(self.expect('number'))
+                i = self.parseFactSpec()
                 self.expect('in')
                 j = int(self.expect('number'))
                 justification = ('Herschrijven', i, j)
@@ -216,16 +240,10 @@ class Parser:
                 i = None
                 if self.tokenType == 'op':
                     self.eat()
-                    i = int(self.expect('number'))
+                    i = self.parseFactSpec()
                 justification = ('Z', i)
             elif self.tokenType == 'identifier':
-                lawName = self.eat()
-                self.expect('op')
-                indices = [int(self.expect('number'))]
-                while self.tokenType == ',' or self.tokenType == 'en':
-                    self.eat()
-                    indices.append(int(self.expect('number')))
-                justification = ('law', lawName, tuple(indices))
+                justification = self.parseFactSpec()
             else:
                 self.error('Justification keyword not supported')
         else:
@@ -250,15 +268,23 @@ class Parser:
         self.expect('EOL')
         return (name, rule)
 
-def get_rewrites(e, lhs, rhs):
+def get_rewrites(e, bindings, lhs, rhs):
     rewrites = [e] # e itself is a rewrite of itself
-    if e == lhs:
-        rewrites.append(rhs)
-    if e == rhs:
-        rewrites.append(lhs)
+    try:
+        bindings1 = dict(bindings)
+        match(bindings1, lhs, e)
+        rewrites.append(subst(rhs, bindings1))
+    except MatchFailure:
+        pass
+    try:
+        bindings1 = dict(bindings)
+        match(bindings1, rhs, e)
+        rewrites.append(subst(lhs, bindings1))
+    except MatchFailure:
+        pass
     if e[0] in ['==', '<=', '<', '+', '-']:
-        for e1 in get_rewrites(e[1], lhs, rhs):
-            for e2 in get_rewrites(e[2], lhs, rhs):
+        for e1 in get_rewrites(e[1], bindings, lhs, rhs):
+            for e2 in get_rewrites(e[2], bindings, lhs, rhs):
                 rewrites.append((e[0], e1, e2))
     return rewrites
 
@@ -406,7 +432,7 @@ def match(bindings, e1, e2):
     else:
         if e1[0] != e2[0]:
             raise MatchFailure("Match failure: %s is not of the form %s" % (e2, e1))
-        if e1[0] in {'and', '==', '+'}:
+        if e1[0] in symmetricBinaryOperators:
             # Take symmetry/commutativity into account
             bindings1 = dict(bindings)
             try:
@@ -416,15 +442,19 @@ def match(bindings, e1, e2):
             except MatchFailure:
                 match(bindings, e1[1], e2[2])
                 match(bindings, e1[2], e2[1])
-        elif e1[0] in {'==>', 'and', '==', '<=', '<', '+', '-'}:
+        elif e1[0] in binaryOperators:
             match(bindings, e1[1], e2[1])
             match(bindings, e1[2], e2[2])
+        elif e1[0] in unaryOperators:
+            match(bindings, e1[1], e2[1])
+        elif e1[0] in nullaryOperators:
+            pass
         elif e1[0] == 'call':
             if e1[1] != e2[1]:
                 raise MatchFailure("Match failure: %s is not of the form %s" % (e2, e1))
             for arg1, arg2 in zip(e1[2], e2[2]):
                 match(bindings, arg1, arg2)
-        elif e1[0] == 'number':
+        elif e1[0] == 'int':
             if e1 != e2:
                 raise MatchFailure("Match failure: expected: %s; found: %s" % (e1, e2))
         else:
@@ -438,17 +468,49 @@ def matches(e1, e2, bindings):
     except MatchFailure:
         return False
 
+freshVarCounter = 0
+
+def get_fresh_var_name():
+    global freshVarCounter
+
+    result = "#x%d" % freshVarCounter
+    freshVarCounter += 1
+    return result
+
 def subst(e, bindings):
     if e[0] == 'var':
+        if e[1] not in bindings:
+            x = get_fresh_var_name()
+            bindings[e[1]] = ('var', x)
         return bindings[e[1]]
-    elif e[0] in {'==>', 'and', '==', '<=', '<', '+', '-'}:
+    elif e[0] in binaryOperators:
         return (e[0], subst(e[1], bindings), subst(e[2], bindings))
+    elif e[0] in unaryOperators:
+        return (e[0], subst(e[1], bindings))
+    elif e[0] in nullaryOperators:
+        return e
     elif e[0] == 'call':
         return ('call', e[1], tuple(map(lambda arg: subst(arg, bindings), e[2])))
-    elif e[0] == 'number':
+    elif e[0] == 'int':
         return e
     else:
         raise ProofError("subst: construct not supported: %s" % (e,))
+
+def get_free_vars(e):
+    if e[0] == 'var':
+        return {e[1]}
+    elif e[0] in binaryOperators:
+        return get_free_vars(e[1]).union(get_free_vars(e[2]))
+    elif e[0] in unaryOperators:
+        return get_free_vars(e[1])
+    elif e[0] in nullaryOperators:
+        return set()
+    elif e[0] == 'call':
+        return set().union(*map(get_free_vars, e[2]))
+    elif e[0] == 'int':
+        return set()
+    else:
+        raise AssertionError("Unsupported construct: %s" % (e,))
 
 def normalize(eq):
     if eq[0] == '==' and eq[2] < eq[1]:
@@ -463,17 +525,38 @@ def check_entailment(line, antecedent, consequent, justification):
             raise ProofError("Line %d: Antecedent conjunct index out of range in antecedent %s" % (line, antecedent))
         return antecedent[i - 1]
 
+    def get_fact(factSpec):
+        if factSpec[0] == 'antecedent':
+            conjunct = get_conjunct(factSpec[1])
+            return dict(map(lambda x: (x, ('var', x)), get_free_vars(conjunct))), conjunct
+        elif factSpec[0] == 'law':
+            _, lawName, arguments = factSpec
+            premisses, conclusion = laws[lawName]
+            if len(arguments) != len(premisses):
+                raise ProofError("De wet %s verwacht %d argumenten; %d gegeven" % (len(premisses), len(arguments)))
+            variableBindings = {}
+            for premiss, argument in zip(premisses, arguments):
+                argBindings, argTerm = get_fact(argument)
+                if set(get_free_vars(argTerm)) != set(argBindings.keys()):
+                    raise ProofError("Law application requires fully instantiated arguments. Argument %s with bindings %s has uninstantiated pattern variables" % (argTerm, argBindings))
+                argTerm = subst(argTerm, argBindings)
+                match(variableBindings, premiss, argTerm)
+            return variableBindings, conclusion
+        else:
+            raise ProofError("Unsupported fact specification form %s" % (factSpec,))
+
     print("Checking entailment %s ==> %s" % (antecedent, consequent))
 
     if justification[0] == 'Herschrijven':
         _, i, j = justification
-        equation = get_conjunct(i)
+        bindings, equation = get_fact(i)
         target = get_conjunct(j)
         if equation[0] != '==':
             raise ProofError("Kan niet herschrijven met " + str(equation) + " want is geen gelijkheid")
-        rewrites = get_rewrites(target, equation[1], equation[2])
+        rewrites = get_rewrites(target, bindings, equation[1], equation[2])
+        targetBindings = dict((x, ('var', x)) for x in get_free_vars(target))
         for conjunct in consequent:
-            if not (conjunct in antecedent or conjunct in rewrites):
+            if not (conjunct in antecedent or any(matches(conjunct, rewrite, targetBindings) for rewrite in rewrites)):
                 raise ProofError("Conjunct niet bewezen: " + str(conjunct) + " (rewrites = " + str(rewrites) + ")")
     elif justification[0] == 'Z':
         if justification[1] == None:
@@ -481,29 +564,29 @@ def check_entailment(line, antecedent, consequent, justification):
                 if not (conjunct in antecedent or is_tautology(normalize_eq(conjunct))):
                     raise ProofError("Conjunct niet bewezen: " + str(conjunct))
         else:
-            antecedent_conjunct = normalize_eq(get_conjunct(justification[1]))
+            bindings, fact = get_fact(justification[1])
+            if set(get_free_vars(fact)) != set(bindings.keys()):
+                raise ProofError("Z justification requires fully instantiated fact. Fact %s under bindings %s has uninstantiated pattern variables" % (fact, bindings))
+            fact = subst(fact, bindings)
+            antecedent_conjunct = normalize_eq(fact)
             for conjunct in consequent:
                 if not (conjunct in antecedent or follows_in_Z_from(normalize_eq(conjunct), antecedent_conjunct)):
                     raise ProofError("Conjunct niet bewezen: " + str(conjunct))
     elif justification[0] == 'law':
-        _, lawName, indices = justification
-        rule = laws[lawName]
-        conclusion = rule
-        premisses = []
-        while conclusion[0] == '==>':
-            premisses.extend(get_conjuncts(conclusion[1]))
-            conclusion = conclusion[2]
-        if len(indices) != len(premisses):
-            raise ProofError("Verantwoording: verwacht %d conjunct-indices; %d gegeven" % (len(premisses), len(indices)))
-        variableBindings = {}
-        for premiss, i in zip(premisses, indices):
-            match(variableBindings, premiss, get_conjunct(i))
-        variableBindings = variableBindings
+        variableBindings, conclusion = get_fact(justification)
         for conjunct in consequent:
             if not (conjunct in antecedent or matches(conjunct, conclusion, variableBindings)):
                 raise ProofError("Conjunct niet bewezen: " + str(conjunct))
     else:
         raise ProofError("Verantwoording niet ondersteund: " + str(justification))
+
+def add_law(name, rule):
+    conclusion = rule
+    premisses = []
+    while conclusion[0] == '==>':
+        premisses.extend(get_conjuncts(conclusion[1]))
+        conclusion = conclusion[2]
+    laws[name] = (premisses, conclusion)
 
 def checkProof(proof):
     if proof == []:
@@ -559,6 +642,12 @@ assert i == n # LeAntisym op 1 en 2
 assert (y == max(x, y) if x < y else x == max(x, y)) and x < y
 assert (y == max(x, y) if x < y else x == max(x, y)) and (y == max(x, y) if x < y else x == max(x, y)) == (y == max(x, y)) # If1 op 2
 assert y == max(x, y) # Herschrijven met 2 in 1
+
+assert (y == max(x, y) if x < y else x == max(x, y)) and x < y
+assert y == max(x, y) # Herschrijven met If1 op 2 in 1
+
+assert y == max(x, y) and x < y
+assert y == max(x, y) if x < y else x == max(x, y) # Herschrijven met If1 op 2 in 1
 '''
 lexer = Lexer(text)
 while True:
@@ -574,7 +663,7 @@ while parser.tokenType != 'EOF':
     elif parser.tokenType == '#':
         name, rule = parser.parseLaw()
         print("Adding law", name, rule)
-        laws[name] = rule
+        add_law(name, rule)
     else:
         proof = parser.parseProof()
         print(proof)
