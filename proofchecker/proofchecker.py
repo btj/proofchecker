@@ -295,6 +295,16 @@ class Parser:
         self.expect('EOL')
         return (name, rule)
 
+def get_rewrites_for_tuple(es, bindings, lhs, rhs):
+    if es == ():
+        return [es]
+    else:
+        rewrites = []
+        for e in get_rewrites(es[0], bindings, lhs, rhs):
+            for es0 in get_rewrites_for_tuple(es[1:], bindings, lhs, rhs):
+                rewrites.append((e,) + es0)
+        return rewrites
+
 def get_rewrites(e, bindings, lhs, rhs):
     rewrites = [e] # e itself is a rewrite of itself
     try:
@@ -309,10 +319,16 @@ def get_rewrites(e, bindings, lhs, rhs):
         rewrites.append(subst(lhs, bindings1))
     except MatchFailure:
         pass
-    if e[0] in ['==', '<=', '<', '+', '-']:
+    if e[0] in binaryOperators:
         for e1 in get_rewrites(e[1], bindings, lhs, rhs):
             for e2 in get_rewrites(e[2], bindings, lhs, rhs):
                 rewrites.append((e[0], e1, e2))
+    elif e[0] in unaryOperators:
+        for e1 in get_rewrites(e[1], bindings, lhs, rhs):
+            rewrites.append((e[0], e1))
+    elif e[0] == 'call':
+        for args in get_rewrites_for_tuple(e[2], bindings, lhs, rhs):
+            rewrites.append(('call', e[1], args))
     return rewrites
 
 class ProofError(Exception):
@@ -561,7 +577,7 @@ def check_entailment(line, antecedent, consequent, justification):
             _, lawName, arguments = factSpec
             premisses, conclusion = laws[lawName]
             if len(arguments) != len(premisses):
-                raise ProofError("De wet %s verwacht %d argumenten; %d gegeven" % (len(premisses), len(arguments)))
+                raise ProofError("De wet %s verwacht %d argumenten; %d gegeven" % (lawName, len(premisses), len(arguments)))
             variableBindings = {}
             for premiss, argument in zip(premisses, arguments):
                 argBindings, argTerm = get_fact(argument)
@@ -699,6 +715,14 @@ assert 1 <= i < len(xs) and max_ == max(max(xs[:i]), xs[i]) # Herschrijven met M
 assert 1 <= i < len(xs) and max_ == max(xs[:i + 1]) # Herschrijven met MaxList2 op 1 en 2 in 3
 assert 1 <= i + 1 and i < len(xs) and max_ == max(xs[:i + 1]) # Z op 1
 assert 1 <= i + 1 <= len(xs) and max_ == max(xs[:i + 1]) # Z op 2
+
+# Wet SliceFull: xs[:len(xs)] == xs
+
+assert 1 <= i <= len(xs) and max_ == max(xs[:i]) and not i < len(xs)
+assert len(xs) <= i and i <= len(xs) and max_ == max(xs[:i]) # Z op 4
+assert i == len(xs) and max_ == max(xs[:i]) # LeAntisym op 1 en 2
+assert max_ == max(xs[:len(xs)]) # Herschrijven met 1 in 2
+assert max_ == max(xs) # Herschrijven met SliceFull in 1
 '''
 lexer = Lexer(text)
 while True:
