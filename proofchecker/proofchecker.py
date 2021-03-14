@@ -120,6 +120,13 @@ class Parser:
         elif self.tokenType == 'True':
             self.eat()
             return 'True',
+        elif self.tokenType == '(':
+            self.eat()
+            e = self.parseExpression()
+            self.expect(')')
+            return e
+        else:
+            self.error("Expression expected")
 
     def parseAddition(self):
         e = self.parsePrimaryExpression()
@@ -155,7 +162,7 @@ class Parser:
 
     def expect(self, tokenType):
         if self.tokenType != tokenType:
-            self.parseError('%s expected, found %s' % (tokenType, self.tokenType))
+            self.error('%s expected, found %s' % (tokenType, self.tokenType))
         return self.eat()
 
     def parseConjunction(self):
@@ -455,6 +462,12 @@ assert 1 <= i + 1 # Herschrijven met 1 in 2
 
 assert i <= n and i < n
 assert i + 1 <= n # Z op 2
+
+assert i <= n and i < n and n - i == oude_variant
+assert i + 1 <= n and n - i == oude_variant # Z op 2
+assert i + 1 <= n and 0 <= n - (i + 1) and n - i == oude_variant # Z op 1
+assert i + 1 <= n and 0 <= n - (i + 1) and n - (i + 1) < n - i and n - i == oude_variant # Z
+assert i + 1 <= n and 0 <= n - (i + 1) < oude_variant # Herschrijven met 4 in 3
 
 # Wet Max1: y <= x ==> max(x, y) == x
 # Wet Max2: x <= y ==> max(x, y) == y
