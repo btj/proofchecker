@@ -685,12 +685,20 @@ assert 1 <= 1 <= len(xs) # Z
 assert 1 <= 1 <= len(xs) and xs[0] == max(xs[:1]) # MaxList1 op 2
 
 assert 1 <= i <= len(xs) and max_ == max(xs[:i]) and i < len(xs) and max_ < xs[i]
-assert 1 <= i <= len(xs) and max_ == max(xs[:i]) and i < len(xs) and max_ <= xs[i] # Z op 5
-assert 1 <= i <= len(xs) and max_ == max(xs[:i]) and i < len(xs) and max(xs[:i]) <= xs[i] # Herschrijven met 3 in 5
-assert 1 <= i <= len(xs) and max_ == max(xs[:i]) and i < len(xs) and xs[i] == max(max(xs[:i]), xs[i]) # Max2 op 5
-assert 1 <= i <= len(xs) and max_ == max(xs[:i]) and i < len(xs) and xs[i] == max(xs[:i + 1]) # Herschrijven met MaxList2 op 1 en 4 in 5
-assert 1 <= i and i + 1 <= len(xs) and xs[i] == max(xs[:i + 1]) # Z op 4
+assert 1 <= i < len(xs) and max_ == max(xs[:i]) and max_ <= xs[i] # Z op 5
+assert 1 <= i < len(xs) and max_ == max(xs[:i]) and max(xs[:i]) <= xs[i] # Herschrijven met 3 in 4
+assert 1 <= i < len(xs) and max_ == max(xs[:i]) and xs[i] == max(max(xs[:i]), xs[i]) # Max2 op 4
+assert 1 <= i < len(xs) and max_ == max(xs[:i]) and xs[i] == max(xs[:i + 1]) # Herschrijven met MaxList2 op 1 en 2 in 4
+assert 1 <= i and i + 1 <= len(xs) and xs[i] == max(xs[:i + 1]) # Z op 2
 assert 1 <= i + 1 <= len(xs) and xs[i] == max(xs[:i + 1]) # Z op 1
+
+assert 1 <= i <= len(xs) and max_ == max(xs[:i]) and i < len(xs) and not max_ < xs[i]
+assert 1 <= i < len(xs) and max_ == max(xs[:i]) and xs[i] <= max_ # Z op 5
+assert 1 <= i < len(xs) and max_ == max(xs[:i]) and xs[i] <= max(xs[:i]) # Herschrijven met 3 in 4
+assert 1 <= i < len(xs) and max_ == max(max(xs[:i]), xs[i]) # Herschrijven met Max1 op 4 in 3
+assert 1 <= i < len(xs) and max_ == max(xs[:i + 1]) # Herschrijven met MaxList2 op 1 en 2 in 3
+assert 1 <= i + 1 and i < len(xs) and max_ == max(xs[:i + 1]) # Z op 1
+assert 1 <= i + 1 <= len(xs) and max_ == max(xs[:i + 1]) # Z op 2
 '''
 lexer = Lexer(text)
 while True:
