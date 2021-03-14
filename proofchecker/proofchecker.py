@@ -1,9 +1,18 @@
 import math
+import sys
+import tkinter
 from fractions import Fraction
+from tkinter import filedialog, scrolledtext, messagebox
 
+class LocError(Exception):
+    def __str__(self):
+        (startLine, startCol), (endLine, endCol) = self.loc
+        return "%s:%s: %s" % (startLine + 1, startCol, self.args[0])
 
-class ParseError(Exception):
-    pass
+class ParseError(LocError):
+    def __init__(self, loc, msg):
+        Exception.__init__(self, msg)
+        self.loc = loc
 
 def is_alpha(c):
     return 'A' <= c and c <= 'Z' or 'a' <= c and c <= 'z' or c == '_'
@@ -47,10 +56,10 @@ class Lexer:
             self.c = self.text[self.pos]
 
     def tokenLoc(self):
-        return (self.line, self.tokenStart - self.startOfLine)
+        return ((self.line, self.tokenStart - self.startOfLine), (self.line, self.pos - self.startOfLine))
 
     def error(self, msg):
-        raise ParseError("%d:%d: %s" % (self.line, self.pos - self.startOfLine, msg))
+        raise ParseError(((self.line, self.pos - self.startOfLine), (self.line, self.pos - self.startOfLine + 1)), msg)
 
     def next_token(self):
         while self.c == ' ':
@@ -98,7 +107,7 @@ class Parser:
         self.tokenLoc = self.lexer.tokenLoc()
 
     def error(self, msg):
-        raise ParseError("%s: %s" % (self.tokenLoc, msg))
+        raise ParseError(self.tokenLoc, msg)
 
     def eat(self):
         value = self.lexer.get_token_value()
@@ -331,7 +340,7 @@ def get_rewrites(e, bindings, lhs, rhs):
             rewrites.append(('call', e[1], args))
     return rewrites
 
-class ProofError(Exception):
+class ProofError(LocError):
     pass
 
 def get_conjuncts(e):
@@ -432,7 +441,6 @@ def get_polyc(eq):
 def follows_in_Z_from(consequent, antecedent):
     antecedent = normalize_eq(antecedent)
     consequent = normalize_eq(consequent)
-    print("Checking entailment in Z: %s ==> %s" % (antecedent, consequent))
     if not {consequent[0], antecedent[0]} <= {'==', '<=', '!='}:
         return False
     if consequent[0] == '==' and antecedent[0] != '==':
@@ -441,7 +449,7 @@ def follows_in_Z_from(consequent, antecedent):
         return False
     op1, c1, poly1 = get_polyc(antecedent)
     op2, c2, poly2 = get_polyc(consequent)
-    print('Checking entailment in Z: %s ==> %s' % ((op1, c1, poly1), (op2, c2, poly2)))
+    # print('Checking entailment in Z: %s ==> %s' % ((op1, c1, poly1), (op2, c2, poly2)))
     if op2 == '==':
         return (c2, poly2) == (c1, poly1)
     elif op2 == '!=':
@@ -564,65 +572,71 @@ def normalize(eq):
 laws = {}
 
 def check_entailment(line, antecedent, consequent, justification):
-    def get_conjunct(i):
-        if i < 1 or len(antecedent) < i:
-            raise ProofError("Line %d: Antecedent conjunct index out of range in antecedent %s" % (line, antecedent))
-        return antecedent[i - 1]
+    try:
+        def get_conjunct(i):
+            if i < 1 or len(antecedent) < i:
+                raise ProofError("Antecedent conjunct index out of range")
+            return antecedent[i - 1]
 
-    def get_fact(factSpec):
-        if factSpec[0] == 'antecedent':
-            conjunct = get_conjunct(factSpec[1])
-            return dict(map(lambda x: (x, ('var', x)), get_free_vars(conjunct))), conjunct
-        elif factSpec[0] == 'law':
-            _, lawName, arguments = factSpec
-            premisses, conclusion = laws[lawName]
-            if len(arguments) != len(premisses):
-                raise ProofError("De wet %s verwacht %d argumenten; %d gegeven" % (lawName, len(premisses), len(arguments)))
-            variableBindings = {}
-            for premiss, argument in zip(premisses, arguments):
-                argBindings, argTerm = get_fact(argument)
-                if set(get_free_vars(argTerm)) != set(argBindings.keys()):
-                    raise ProofError("Law application requires fully instantiated arguments. Argument %s with bindings %s has uninstantiated pattern variables" % (argTerm, argBindings))
-                argTerm = subst(argTerm, argBindings)
-                match(variableBindings, premiss, argTerm)
-            return variableBindings, conclusion
-        else:
-            raise ProofError("Unsupported fact specification form %s" % (factSpec,))
+        def get_fact(factSpec):
+            if factSpec[0] == 'antecedent':
+                conjunct = get_conjunct(factSpec[1])
+                return dict(map(lambda x: (x, ('var', x)), get_free_vars(conjunct))), conjunct
+            elif factSpec[0] == 'law':
+                _, lawName, arguments = factSpec
+                if lawName not in laws:
+                    raise ProofError("No such law: %s" % lawName)
+                premisses, conclusion = laws[lawName]
+                if len(arguments) != len(premisses):
+                    raise ProofError("De wet %s verwacht %d argumenten; %d gegeven" % (lawName, len(premisses), len(arguments)))
+                variableBindings = {}
+                for premiss, argument in zip(premisses, arguments):
+                    argBindings, argTerm = get_fact(argument)
+                    if set(get_free_vars(argTerm)) != set(argBindings.keys()):
+                        raise ProofError("Law application requires fully instantiated arguments. Argument %s with bindings %s has uninstantiated pattern variables" % (argTerm, argBindings))
+                    argTerm = subst(argTerm, argBindings)
+                    match(variableBindings, premiss, argTerm)
+                return variableBindings, conclusion
+            else:
+                raise ProofError("Unsupported fact specification form %s" % (factSpec,))
 
-    print("Checking entailment %s ==> %s" % (antecedent, consequent))
+        # print("Checking entailment %s ==> %s" % (antecedent, consequent))
 
-    if justification[0] == 'Herschrijven':
-        _, i, j = justification
-        bindings, equation = get_fact(i)
-        target = get_conjunct(j)
-        if equation[0] != '==':
-            raise ProofError("Kan niet herschrijven met " + str(equation) + " want is geen gelijkheid")
-        rewrites = get_rewrites(target, bindings, equation[1], equation[2])
-        targetBindings = dict((x, ('var', x)) for x in get_free_vars(target))
-        for conjunct in consequent:
-            if not (conjunct in antecedent or any(matches(conjunct, rewrite, targetBindings) for rewrite in rewrites)):
-                raise ProofError("Conjunct niet bewezen: " + str(conjunct) + " (rewrites = " + str(rewrites) + ")")
-    elif justification[0] == 'Z':
-        if justification[1] == None:
+        if justification[0] == 'Herschrijven':
+            _, i, j = justification
+            bindings, equation = get_fact(i)
+            target = get_conjunct(j)
+            if equation[0] != '==':
+                raise ProofError("Kan niet herschrijven met " + str(equation) + " want is geen gelijkheid")
+            rewrites = get_rewrites(target, bindings, equation[1], equation[2])
+            targetBindings = dict((x, ('var', x)) for x in get_free_vars(target))
             for conjunct in consequent:
-                if not (conjunct in antecedent or is_tautology(normalize_eq(conjunct))):
+                if not (conjunct in antecedent or any(matches(conjunct, rewrite, targetBindings) for rewrite in rewrites)):
+                    raise ProofError("Conjunct niet bewezen: " + str(conjunct) + " (rewrites = " + str(rewrites) + ")")
+        elif justification[0] == 'Z':
+            if justification[1] == None:
+                for conjunct in consequent:
+                    if not (conjunct in antecedent or is_tautology(normalize_eq(conjunct))):
+                        raise ProofError("Conjunct niet bewezen: " + str(conjunct))
+            else:
+                bindings, fact = get_fact(justification[1])
+                if set(get_free_vars(fact)) != set(bindings.keys()):
+                    raise ProofError("Z justification requires fully instantiated fact. Fact %s under bindings %s has uninstantiated pattern variables" % (fact, bindings))
+                fact = subst(fact, bindings)
+                antecedent_conjunct = normalize_eq(fact)
+                for conjunct in consequent:
+                    if not (conjunct in antecedent or follows_in_Z_from(normalize_eq(conjunct), antecedent_conjunct)):
+                        raise ProofError("Conjunct niet bewezen: " + str(conjunct))
+        elif justification[0] == 'law':
+            variableBindings, conclusion = get_fact(justification)
+            for conjunct in consequent:
+                if not (conjunct in antecedent or matches(conjunct, conclusion, variableBindings)):
                     raise ProofError("Conjunct niet bewezen: " + str(conjunct))
         else:
-            bindings, fact = get_fact(justification[1])
-            if set(get_free_vars(fact)) != set(bindings.keys()):
-                raise ProofError("Z justification requires fully instantiated fact. Fact %s under bindings %s has uninstantiated pattern variables" % (fact, bindings))
-            fact = subst(fact, bindings)
-            antecedent_conjunct = normalize_eq(fact)
-            for conjunct in consequent:
-                if not (conjunct in antecedent or follows_in_Z_from(normalize_eq(conjunct), antecedent_conjunct)):
-                    raise ProofError("Conjunct niet bewezen: " + str(conjunct))
-    elif justification[0] == 'law':
-        variableBindings, conclusion = get_fact(justification)
-        for conjunct in consequent:
-            if not (conjunct in antecedent or matches(conjunct, conclusion, variableBindings)):
-                raise ProofError("Conjunct niet bewezen: " + str(conjunct))
-    else:
-        raise ProofError("Verantwoording niet ondersteund: " + str(justification))
+            raise ProofError("Verantwoording niet ondersteund: " + str(justification))
+    except ProofError as e:
+        e.loc = (line, (line[0],-1))
+        raise e
 
 def add_law(name, rule):
     conclusion = rule
@@ -646,112 +660,76 @@ def checkProof(proof):
         antecedent = consequent
         i += 1
 
-text = '''
-assert 0 <= n and i == 0
-assert i <= n # Herschrijven met 2 in 1
+def check_text(text):
+    # lexer = Lexer(text)
+    # while True:
+    #     token = lexer.next_token()
+    #     print("'%s': '%s'" % (token, lexer.get_token_value()))
+    #     if token == 'EOF':
+    #         break
 
-assert i == 0
-assert i == 0 and 1 <= 0 + 1 # Z
-assert 1 <= i + 1 # Herschrijven met 1 in 2
+    parser = Parser(text)
+    while parser.tokenType != 'EOF':
+        if parser.tokenType == 'EOL':
+            parser.eat()
+        elif parser.tokenType == '#':
+            name, rule = parser.parseLaw()
+            # print("Adding law", name, rule)
+            add_law(name, rule)
+        else:
+            proof = parser.parseProof()
+            # print(proof)
+            checkProof(proof)
 
-assert i <= n and i < n
-assert i + 1 <= n # Z op 2
+def check_file(path):
+    with open(path) as f:
+        text = f.read()
+    check_text(text)
 
-assert i <= n and i < n and n - i == oude_variant
-assert i + 1 <= n and n - i == oude_variant # Z op 2
-assert i + 1 <= n and 0 <= n - (i + 1) and n - i == oude_variant # Z op 1
-assert i + 1 <= n and 0 <= n - (i + 1) and n - (i + 1) < n - i and n - i == oude_variant # Z
-assert i + 1 <= n and 0 <= n - (i + 1) < oude_variant # Herschrijven met 4 in 3
+if len(sys.argv) > 1:
+    try:
+        check_file(sys.argv[1])
+        print("%s was checked successfully; the proof outline is valid!" % (sys.argv[1],))
+    except LocError as e:
+        print(e)
+else:
+    window = tkinter.Tk()
+    window.title("Proof Checker")
+    panedWindow = tkinter.PanedWindow(window, orient=tkinter.VERTICAL)
 
-# Wet Max1: y <= x ==> max(x, y) == x
-# Wet Max2: x <= y ==> max(x, y) == y
+    def check_proof():
+        text_box.tag_remove('error', '1.0', tkinter.END)
+        error_msg_box.delete('1.0', tkinter.END)
+        window.update()
+        try:
+            check_text(text_box.get('1.0', tkinter.END))
+            messagebox.showinfo(message="Geen fouten gevonden; het bewijs is geldig!")
+        except LocError as e:
+            (startLine, startCol), (endLine, endCol) = e.loc
+            print(e.loc)
+            text_box.tag_add('error', '%d.%s' % (startLine + 1, 'end' if startCol == -1 else startCol), '%d.%s' % (endLine + 1, 'end' if endCol == -1 else endCol))
+            error_msg_box.insert('1.0', e.args[0])
+    menubar = tkinter.Menu(window)
+    proof = tkinter.Menu(menubar)
+    proof.add_command(label="Check proof", command=check_proof)
+    menubar.add_cascade(label="Proof", menu=proof)
 
-assert True and x < y
-assert x <= y # Z op 2
-assert y == max(x, y) # Max2 op 1
+    # display the menu
+    window.config(menu=menubar)
 
-assert True and not x < y
-assert y <= x # Z op 2
-assert x == max(x, y) # Max1 op 1
+    text_box = scrolledtext.ScrolledText(panedWindow)
+    text_box.pack(fill=tkinter.BOTH, expand=True)
+    with open('gevolgtrekkingen_uit_voorbeeldsilhouetten.py') as f:
+        text = f.read()
+    text_box.insert('1.0', text)
 
-# Wet LeAntisym: x <= y and y <= x ==> x == y
+    text_box.tag_config('error', foreground='red', underline=1)
+    panedWindow.add(text_box)
 
-assert i <= n and not i < n
-assert i <= n and n <= i # Z op 2
-assert i == n # LeAntisym op 1 en 2
+    error_msg_box = scrolledtext.ScrolledText(panedWindow)
+    error_msg_box.pack(fill=tkinter.BOTH, expand=True)
+    panedWindow.add(error_msg_box)
 
-# Wet If1: A ==> (E1 if A else E2) == E1
-# Wet If2: not A ==> (E1 if A else E2) == E2
+    panedWindow.pack(fill=tkinter.BOTH, expand=True)
 
-assert (y == max(x, y) if x < y else x == max(x, y)) and x < y
-assert (y == max(x, y) if x < y else x == max(x, y)) and (y == max(x, y) if x < y else x == max(x, y)) == (y == max(x, y)) # If1 op 2
-assert y == max(x, y) # Herschrijven met 2 in 1
-
-assert (y == max(x, y) if x < y else x == max(x, y)) and x < y
-assert y == max(x, y) # Herschrijven met If1 op 2 in 1
-
-assert y == max(x, y) and x < y
-assert y == max(x, y) if x < y else x == max(x, y) # Herschrijven met If1 op 2 in 1
-
-# Wet MaxList1: 1 <= len(xs) ==> max(xs[:1]) == xs[0]
-# Wet MaxList2: 1 <= i < len(xs) ==> max(xs[:i + 1]) == max(max(xs[:i]), xs[i])
-
-assert 1 <= len(xs)
-assert 1 <= 1 <= len(xs) # Z
-assert 1 <= 1 <= len(xs) and xs[0] == max(xs[:1]) # MaxList1 op 2
-
-assert 1 <= i <= len(xs) and max_ == max(xs[:i]) and i < len(xs) and max_ < xs[i]
-assert 1 <= i < len(xs) and max_ == max(xs[:i]) and max_ <= xs[i] # Z op 5
-assert 1 <= i < len(xs) and max_ == max(xs[:i]) and max(xs[:i]) <= xs[i] # Herschrijven met 3 in 4
-assert 1 <= i < len(xs) and max_ == max(xs[:i]) and xs[i] == max(max(xs[:i]), xs[i]) # Max2 op 4
-assert 1 <= i < len(xs) and max_ == max(xs[:i]) and xs[i] == max(xs[:i + 1]) # Herschrijven met MaxList2 op 1 en 2 in 4
-assert 1 <= i and i + 1 <= len(xs) and xs[i] == max(xs[:i + 1]) # Z op 2
-assert 1 <= i + 1 <= len(xs) and xs[i] == max(xs[:i + 1]) # Z op 1
-
-assert 1 <= i <= len(xs) and max_ == max(xs[:i]) and i < len(xs) and not max_ < xs[i]
-assert 1 <= i < len(xs) and max_ == max(xs[:i]) and xs[i] <= max_ # Z op 5
-assert 1 <= i < len(xs) and max_ == max(xs[:i]) and xs[i] <= max(xs[:i]) # Herschrijven met 3 in 4
-assert 1 <= i < len(xs) and max_ == max(max(xs[:i]), xs[i]) # Herschrijven met Max1 op 4 in 3
-assert 1 <= i < len(xs) and max_ == max(xs[:i + 1]) # Herschrijven met MaxList2 op 1 en 2 in 3
-assert 1 <= i + 1 and i < len(xs) and max_ == max(xs[:i + 1]) # Z op 1
-assert 1 <= i + 1 <= len(xs) and max_ == max(xs[:i + 1]) # Z op 2
-
-# Wet SliceFull: xs[:len(xs)] == xs
-
-assert 1 <= i <= len(xs) and max_ == max(xs[:i]) and not i < len(xs)
-assert len(xs) <= i and i <= len(xs) and max_ == max(xs[:i]) # Z op 4
-assert i == len(xs) and max_ == max(xs[:i]) # LeAntisym op 1 en 2
-assert max_ == max(xs[:len(xs)]) # Herschrijven met 1 in 2
-assert max_ == max(xs) # Herschrijven met SliceFull in 1
-
-# Wet LeNeqLt: x <= y and x != y ==> x < y
-
-assert i <= n and i != n and n - i == oude_variant
-assert i < n and n - i == oude_variant # LeNeqLt op 1 en 2
-assert i + 1 <= n and n - i == oude_variant # Z op 1
-assert i + 1 <= n and 0 <= n - (i + 1) and n - i == oude_variant # Z op 1
-assert i + 1 <= n and 0 <= n - (i + 1) < n - i and n - i == oude_variant # Z
-assert i + 1 <= n and 0 <= n - (i + 1) < oude_variant # Herschrijven met 4 in 3
-
-assert i <= n and not i != n
-assert i == n # Z op 2
-'''
-lexer = Lexer(text)
-while True:
-    token = lexer.next_token()
-    print("'%s': '%s'" % (token, lexer.get_token_value()))
-    if token == 'EOF':
-        break
-
-parser = Parser(text)
-while parser.tokenType != 'EOF':
-    if parser.tokenType == 'EOL':
-        parser.eat()
-    elif parser.tokenType == '#':
-        name, rule = parser.parseLaw()
-        print("Adding law", name, rule)
-        add_law(name, rule)
-    else:
-        proof = parser.parseProof()
-        print(proof)
-        checkProof(proof)
+    tkinter.mainloop()
