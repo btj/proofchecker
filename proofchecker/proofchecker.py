@@ -11,13 +11,13 @@ def is_alpha(c):
 def is_digit(c):
     return '0' <= c and c <= '9'
 
-operators = {'==', '<=', '<', '+', '-', '#', '(', ')', ',', '==>', ':'}
+operators = {'!=', '==', '<=', '<', '+', '-', '#', '(', ')', ',', '==>', ':'}
 operatorPrefixes = set()
 for operator in operators:
     for i in range(1,len(operator) + 1):
         operatorPrefixes.add(operator[:i])
 
-keywords = ['assert', 'and', 'True', 'Herschrijven', 'met', 'in', 'Z', 'op', 'Wet']
+keywords = ['assert', 'and', 'True', 'Herschrijven', 'met', 'in', 'Z', 'op', 'Wet', 'not']
 
 class Lexer:
     def __init__(self, text):
@@ -125,6 +125,10 @@ class Parser:
             e = self.parseExpression()
             self.expect(')')
             return e
+        elif self.tokenType == 'not':
+            self.eat()
+            e = self.parseComparison()
+            return ('not', e)
         else:
             self.error("Expression expected")
 
@@ -144,13 +148,13 @@ class Parser:
 
     def parseComparison(self):
         e = self.parseAddition()
-        if self.tokenType in ['==', '<=', '<']:
+        if self.tokenType in ['==', '<=', '<', '!=']:
             operator = self.tokenType
             self.eat()
             e2 = self.parseAddition()
             result = (operator, e, e2)
             e = e2
-            while self.tokenType in ['==', '<=', '<']:
+            while self.tokenType in ['==', '<=', '<', '!=']:
                 operator = self.tokenType
                 self.eat()
                 e2 = self.parseAddition()
@@ -301,15 +305,33 @@ def get_poly(e):
         raise ProofError("get_poly: not supported: " + str(e))
 
 def is_tautology(e):
-    if e[0] not in ['==', '<=', '<']:
+    if e[0] not in ['==', '<=', '!=']:
         return False
     poly = get_poly(('-', e[2], e[1]))
     if e[0] == '==':
         return poly == {}
+    elif e[0] == '!=':
+        return set(poly.keys()) == {()} and 0 != poly[()]
     elif e[0] == '<=':
         return set(poly.keys()) == set() or set(poly.keys()) == {()} and 0 <= poly[()]
-    else:
-        return set(poly.keys()) == {()} and 0 < poly[()]
+
+def normalize_eq(e):
+    """Rewrites an equation to a form not involving not or <, i.e. involving only ==, <=, or !="""
+    if e[0] == 'not':
+        e1 = normalize_eq(e[1])
+        if e1[0] == 'not':
+            e = e1[1]
+        elif e1[0] == '==':
+            e = ('!=', e1[1], e1[2])
+        elif e1[0] == '!=':
+            e = ('==', e1[1], e1[2])
+        elif e1[0] == '<=':
+            e = ('<=', e1[2], ('+', ('int', -1), e1[1]))
+        else:
+            return e
+    if e[0] == '<':
+        return ('<=', e[1], ('+', ('int', -1), e[2]))
+    return e
 
 def get_polyc(eq):
     poly = get_poly(('-', eq[2], eq[1]))
@@ -318,12 +340,9 @@ def get_polyc(eq):
         c = Fraction(poly[()])
         del poly[()]
     op = eq[0]
-    if op == '<':
-        c -= 1
-        op = '<='
     if poly != {}:
         gcd = math.gcd(*poly.values())
-        if op == '==' and poly[min(poly.keys())] < 0:
+        if op == '==' or op == '!=' and poly[min(poly.keys())] < 0:
             gcd *= -1
         for key in list(poly.keys()):
             poly[key] /= gcd
@@ -331,16 +350,33 @@ def get_polyc(eq):
     return op, c, poly
 
 def follows_in_Z_from(consequent, antecedent):
-    if not {consequent[0], antecedent[0]} <= {'==', '<=', '<'}:
+    antecedent = normalize_eq(antecedent)
+    consequent = normalize_eq(consequent)
+    if not {consequent[0], antecedent[0]} <= {'==', '<=', '!='}:
         return False
     if consequent[0] == '==' and antecedent[0] != '==':
+        return False
+    if consequent[0] == '<=' and antecedent[0] == '!=':
         return False
     op1, c1, poly1 = get_polyc(antecedent)
     op2, c2, poly2 = get_polyc(consequent)
     print('Checking entailment in Z: %s ==> %s' % ((op1, c1, poly1), (op2, c2, poly2)))
     if op2 == '==':
         return (c2, poly2) == (c1, poly1)
-    return poly2 == poly1 and c1 <= c2
+    elif op2 == '!=':
+        if op1 == '!=':
+            return (c2, poly2) == (c1, poly1)
+        elif op1 == '==':
+            return poly2 == poly1 and c1 != c2
+        else:
+            assert op1 == '<='
+            return poly2 == poly1 and c1 < c2
+    assert op2 == '<='
+    if op1 == '<=':
+        return poly2 == poly1 and c1 <= c2
+    else:
+        assert op1 == '=='
+        return poly2 == poly1 and c1 <= c2 or poly2 == scale_poly(-1, poly1) and -c1 <= c2
 
 def match(bindings, e1, e2):
     """
@@ -410,12 +446,12 @@ def check_entailment(line, antecedent, consequent, justification):
     elif justification[0] == 'Z':
         if justification[1] == None:
             for conjunct in consequent:
-                if not (conjunct in antecedent or is_tautology(conjunct)):
+                if not (conjunct in antecedent or is_tautology(normalize_eq(conjunct))):
                     raise ProofError("Conjunct niet bewezen: " + str(conjunct))
         else:
-            antecedent_conjunct = get_conjunct(justification[1])
+            antecedent_conjunct = normalize_eq(get_conjunct(justification[1]))
             for conjunct in consequent:
-                if not (conjunct in antecedent or follows_in_Z_from(conjunct, antecedent_conjunct)):
+                if not (conjunct in antecedent or follows_in_Z_from(normalize_eq(conjunct), antecedent_conjunct)):
                     raise ProofError("Conjunct niet bewezen: " + str(conjunct))
     elif justification[0] == 'law':
         _, lawName, indices = justification
@@ -475,6 +511,10 @@ assert i + 1 <= n and 0 <= n - (i + 1) < oude_variant # Herschrijven met 4 in 3
 assert True and x < y
 assert x <= y # Z op 2
 assert y == max(x, y) # Max2 op 1
+
+assert True and not x < y
+assert y <= x # Z op 2
+assert x == max(x, y) # Max1 op 1
 '''
 lexer = Lexer(text)
 while True:
