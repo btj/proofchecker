@@ -35,3 +35,10 @@ assert i + 1 <= n and n - i == oude_variant # Z op 2
 assert i + 1 <= n and 0 <= n - (i + 1) and n - i == oude_variant # Z op 1
 assert i + 1 <= n and 0 <= n - (i + 1) and n - (i + 1) < n - i and n - i == oude_variant # Z
 assert i + 1 <= n and 0 <= n - (i + 1) < oude_variant # Herschrijven met 4 in 3
+
+# Wet If1: A ==> (E1 if A else E2) == E1
+# Wet If2: not A ==> (E1 if A else E2) == E2
+
+assert (y == max(x, y) if x < y else x == max(x, y)) and x < y
+assert (y == max(x, y) if x < y else x == max(x, y)) and (y == max(x, y) if x < y else x == max(x, y)) == (y == max(x, y)) # If1 op 2
+assert y == max(x, y) # Herschrijven met 2 in 1

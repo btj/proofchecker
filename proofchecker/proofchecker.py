@@ -17,7 +17,7 @@ for operator in operators:
     for i in range(1,len(operator) + 1):
         operatorPrefixes.add(operator[:i])
 
-keywords = ['assert', 'and', 'True', 'Herschrijven', 'met', 'in', 'Z', 'op', 'Wet', 'not', 'en']
+keywords = ['assert', 'and', 'True', 'Herschrijven', 'met', 'in', 'Z', 'op', 'Wet', 'not', 'en', 'if', 'else']
 
 class Lexer:
     def __init__(self, text):
@@ -177,11 +177,22 @@ class Parser:
             e = ('and', e, e2)
         return e
 
-    def parseImplication(self):
+    def parseIfThenElse(self):
         e = self.parseConjunction()
+        if self.tokenType == 'if':
+            self.eat()
+            cond = self.parseExpression()
+            self.expect('else')
+            elseBranch = self.parseIfThenElse()
+            return ('call', '#ifthenelse', (cond, e, elseBranch))
+        else:
+            return e
+
+    def parseImplication(self):
+        e = self.parseIfThenElse()
         if self.tokenType == '==>':
             self.eat()
-            return ('==>', e, self.parseImplication())
+            return ('==>', e, self.parseIfThenElse())
         return e
 
     def parseExpression(self):
@@ -378,6 +389,9 @@ def follows_in_Z_from(consequent, antecedent):
         assert op1 == '=='
         return poly2 == poly1 and c1 <= c2 or poly2 == scale_poly(-1, poly1) and -c1 <= c2
 
+class MatchFailure(ProofError):
+    pass
+
 def match(bindings, e1, e2):
     """
     Extends the bindings so that subst(bindings, e1) == e2, or raises a ProofError.
@@ -386,25 +400,43 @@ def match(bindings, e1, e2):
         x = e1[1]
         if x in bindings:
             if e2 != bindings[x]:
-                raise ProofError("Match failure: expected: %s; found: %s" % (bindings[x], e2))
+                raise MatchFailure("Match failure: expected: %s; found: %s" % (bindings[x], e2))
         else:
             bindings[x] = e2
     else:
         if e1[0] != e2[0]:
-            raise ProofError("Match failure: %s is not of the form %s" % (e2, e1))
-        if e1[0] in {'==>', 'and', '==', '<=', '<', '+', '-'}:
+            raise MatchFailure("Match failure: %s is not of the form %s" % (e2, e1))
+        if e1[0] in {'and', '==', '+'}:
+            # Take symmetry/commutativity into account
+            bindings1 = dict(bindings)
+            try:
+                match(bindings1, e1[1], e2[1])
+                match(bindings1, e1[2], e2[2])
+                bindings.update(bindings1)
+            except MatchFailure:
+                match(bindings, e1[1], e2[2])
+                match(bindings, e1[2], e2[1])
+        elif e1[0] in {'==>', 'and', '==', '<=', '<', '+', '-'}:
             match(bindings, e1[1], e2[1])
             match(bindings, e1[2], e2[2])
         elif e1[0] == 'call':
             if e1[1] != e2[1]:
-                raise ProofError("Match failure: %s is not of the form %s" % (e2, e1))
+                raise MatchFailure("Match failure: %s is not of the form %s" % (e2, e1))
             for arg1, arg2 in zip(e1[2], e2[2]):
                 match(bindings, arg1, arg2)
         elif e1[0] == 'number':
             if e1 != e2:
-                raise ProofError("Match failure: expected: %s; found: %s" % (e1, e2))
+                raise MatchFailure("Match failure: expected: %s; found: %s" % (e1, e2))
         else:
             raise ProofError("match: construct not supported: %s" % e1)
+
+def matches(e1, e2, bindings):
+    """Returns whether bindings can be extended so that subst(e2, bindings) == e1"""
+    try:
+        match(dict(bindings), e2, e1)
+        return True
+    except MatchFailure:
+        return False
 
 def subst(e, bindings):
     if e[0] == 'var':
@@ -466,10 +498,9 @@ def check_entailment(line, antecedent, consequent, justification):
         variableBindings = {}
         for premiss, i in zip(premisses, indices):
             match(variableBindings, premiss, get_conjunct(i))
-        instantiatedConclusion = subst(conclusion, variableBindings)
-        print('Instantiated conclusion: ', instantiatedConclusion)
+        variableBindings = variableBindings
         for conjunct in consequent:
-            if not (conjunct in antecedent or normalize(conjunct) == normalize(instantiatedConclusion)):
+            if not (conjunct in antecedent or matches(conjunct, conclusion, variableBindings)):
                 raise ProofError("Conjunct niet bewezen: " + str(conjunct))
     else:
         raise ProofError("Verantwoording niet ondersteund: " + str(justification))
@@ -521,6 +552,13 @@ assert x == max(x, y) # Max1 op 1
 assert i <= n and not i < n
 assert i <= n and n <= i # Z op 2
 assert i == n # LeAntisym op 1 en 2
+
+# Wet If1: A ==> (E1 if A else E2) == E1
+# Wet If2: not A ==> (E1 if A else E2) == E2
+
+assert (y == max(x, y) if x < y else x == max(x, y)) and x < y
+assert (y == max(x, y) if x < y else x == max(x, y)) and (y == max(x, y) if x < y else x == max(x, y)) == (y == max(x, y)) # If1 op 2
+assert y == max(x, y) # Herschrijven met 2 in 1
 '''
 lexer = Lexer(text)
 while True:
@@ -535,6 +573,7 @@ while parser.tokenType != 'EOF':
         parser.eat()
     elif parser.tokenType == '#':
         name, rule = parser.parseLaw()
+        print("Adding law", name, rule)
         laws[name] = rule
     else:
         proof = parser.parseProof()
