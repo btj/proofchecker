@@ -19,7 +19,7 @@ for operator in operators:
 
 keywords = ['assert', 'and', 'True', 'Herschrijven', 'met', 'in', 'Z', 'op', 'Wet', 'not', 'en', 'if', 'else']
 
-binaryOperators = {'==>', 'and', '==', '<=', '<', '+', '-'}
+binaryOperators = {'==>', 'and', '==', '<=', '<', '+', '-', '!='}
 symmetricBinaryOperators = {'and', '==', '+'}
 
 unaryOperators = {'not'}
@@ -723,6 +723,18 @@ assert len(xs) <= i and i <= len(xs) and max_ == max(xs[:i]) # Z op 4
 assert i == len(xs) and max_ == max(xs[:i]) # LeAntisym op 1 en 2
 assert max_ == max(xs[:len(xs)]) # Herschrijven met 1 in 2
 assert max_ == max(xs) # Herschrijven met SliceFull in 1
+
+# Wet LeNeqLt: x <= y and x != y ==> x < y
+
+assert i <= n and i != n and n - i == oude_variant
+assert i < n and n - i == oude_variant # LeNeqLt op 1 en 2
+assert i + 1 <= n and n - i == oude_variant # Z op 1
+assert i + 1 <= n and 0 <= n - (i + 1) and n - i == oude_variant # Z op 1
+assert i + 1 <= n and 0 <= n - (i + 1) < n - i and n - i == oude_variant # Z
+assert i + 1 <= n and 0 <= n - (i + 1) < oude_variant # Herschrijven met 4 in 3
+
+assert i <= n and not i != n
+assert i == n # Z op 2
 '''
 lexer = Lexer(text)
 while True:
