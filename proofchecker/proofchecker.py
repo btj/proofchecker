@@ -11,7 +11,7 @@ def is_alpha(c):
 def is_digit(c):
     return '0' <= c and c <= '9'
 
-operators = {'!=', '==', '<=', '<', '+', '-', '#', '(', ')', ',', '==>', ':'}
+operators = {'!=', '==', '<=', '<', '+', '-', '#', '(', ')', ',', '==>', ':', '[', ']'}
 operatorPrefixes = set()
 for operator in operators:
     for i in range(1,len(operator) + 1):
@@ -138,8 +138,35 @@ class Parser:
         else:
             self.error("Expression expected")
 
-    def parseAddition(self):
+    def parseSuffixExpression(self):
         e = self.parsePrimaryExpression()
+        while self.tokenType == '[':
+            self.eat()
+            if self.tokenType == ':':
+                self.eat()
+                if self.tokenType == ']':
+                    end = ('call', 'len', (e,))
+                else:
+                    end = self.parseExpression()
+                self.expect(']')
+                e = ('call', '#slice', (e, ('int', 0), end))
+            else:
+                index = self.parseExpression()
+                if self.tokenType == ':':
+                    self.eat()
+                    if self.tokenType == ']':
+                        end = ('call', 'len', (e,))
+                    else:
+                        end = self.parseExpression()
+                    self.expect(']')
+                    e = ('call', '#slice', (e, index, end))
+                else:
+                    self.expect(']')
+                    e = ('call', '#subscript', (e, index))
+        return e
+
+    def parseAddition(self):
+        e = self.parseSuffixExpression()
         while True:
             if self.tokenType == '+':
                 self.eat()
@@ -339,7 +366,7 @@ def get_poly(e):
         poly2 = get_poly(e[2])
         return add_polys(poly1, scale_poly(-1, poly2))
     else:
-        raise ProofError("get_poly: not supported: " + str(e))
+        return {(e,): 1}
 
 def is_tautology(e):
     if e[0] not in ['==', '<=', '!=']:
@@ -389,6 +416,7 @@ def get_polyc(eq):
 def follows_in_Z_from(consequent, antecedent):
     antecedent = normalize_eq(antecedent)
     consequent = normalize_eq(consequent)
+    print("Checking entailment in Z: %s ==> %s" % (antecedent, consequent))
     if not {consequent[0], antecedent[0]} <= {'==', '<=', '!='}:
         return False
     if consequent[0] == '==' and antecedent[0] != '==':
@@ -648,6 +676,21 @@ assert y == max(x, y) # Herschrijven met If1 op 2 in 1
 
 assert y == max(x, y) and x < y
 assert y == max(x, y) if x < y else x == max(x, y) # Herschrijven met If1 op 2 in 1
+
+# Wet MaxList1: 1 <= len(xs) ==> max(xs[:1]) == xs[0]
+# Wet MaxList2: 1 <= i < len(xs) ==> max(xs[:i + 1]) == max(max(xs[:i]), xs[i])
+
+assert 1 <= len(xs)
+assert 1 <= 1 <= len(xs) # Z
+assert 1 <= 1 <= len(xs) and xs[0] == max(xs[:1]) # MaxList1 op 2
+
+assert 1 <= i <= len(xs) and max_ == max(xs[:i]) and i < len(xs) and max_ < xs[i]
+assert 1 <= i <= len(xs) and max_ == max(xs[:i]) and i < len(xs) and max_ <= xs[i] # Z op 5
+assert 1 <= i <= len(xs) and max_ == max(xs[:i]) and i < len(xs) and max(xs[:i]) <= xs[i] # Herschrijven met 3 in 5
+assert 1 <= i <= len(xs) and max_ == max(xs[:i]) and i < len(xs) and xs[i] == max(max(xs[:i]), xs[i]) # Max2 op 5
+assert 1 <= i <= len(xs) and max_ == max(xs[:i]) and i < len(xs) and xs[i] == max(xs[:i + 1]) # Herschrijven met MaxList2 op 1 en 4 in 5
+assert 1 <= i and i + 1 <= len(xs) and xs[i] == max(xs[:i + 1]) # Z op 4
+assert 1 <= i + 1 <= len(xs) and xs[i] == max(xs[:i + 1]) # Z op 1
 '''
 lexer = Lexer(text)
 while True:
