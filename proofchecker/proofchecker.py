@@ -17,7 +17,7 @@ for operator in operators:
     for i in range(1,len(operator) + 1):
         operatorPrefixes.add(operator[:i])
 
-keywords = ['assert', 'and', 'True', 'Herschrijven', 'met', 'in', 'Z', 'op', 'Wet', 'not']
+keywords = ['assert', 'and', 'True', 'Herschrijven', 'met', 'in', 'Z', 'op', 'Wet', 'not', 'en']
 
 class Lexer:
     def __init__(self, text):
@@ -211,7 +211,7 @@ class Parser:
                 lawName = self.eat()
                 self.expect('op')
                 indices = [int(self.expect('number'))]
-                while self.tokenType == ',':
+                while self.tokenType == ',' or self.tokenType == 'en':
                     self.eat()
                     indices.append(int(self.expect('number')))
                 justification = ('law', lawName, tuple(indices))
@@ -459,10 +459,10 @@ def check_entailment(line, antecedent, consequent, justification):
         conclusion = rule
         premisses = []
         while conclusion[0] == '==>':
-            premisses.append(conclusion[1])
+            premisses.extend(get_conjuncts(conclusion[1]))
             conclusion = conclusion[2]
         if len(indices) != len(premisses):
-            raise ProofError("Verantwoording: verwacht %d conjunct-indices; slechts %d gegeven" % (len(premisses), len(indices)))
+            raise ProofError("Verantwoording: verwacht %d conjunct-indices; %d gegeven" % (len(premisses), len(indices)))
         variableBindings = {}
         for premiss, i in zip(premisses, indices):
             match(variableBindings, premiss, get_conjunct(i))
@@ -515,6 +515,12 @@ assert y == max(x, y) # Max2 op 1
 assert True and not x < y
 assert y <= x # Z op 2
 assert x == max(x, y) # Max1 op 1
+
+# Wet LeAntisym: x <= y and y <= x ==> x == y
+
+assert i <= n and not i < n
+assert i <= n and n <= i # Z op 2
+assert i == n # LeAntisym op 1 en 2
 '''
 lexer = Lexer(text)
 while True:
