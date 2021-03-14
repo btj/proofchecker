@@ -1,3 +1,7 @@
+import math
+from fractions import Fraction
+
+
 class ParseError(Exception):
     pass
 
@@ -13,7 +17,8 @@ for operator in operators:
     for i in range(1,len(operator) + 1):
         operatorPrefixes.add(operator[:i])
 
-keywords = ['assert', 'and', 'True', 'Herschrijven', 'met', 'in', 'Tautologie']
+keywords = ['assert', 'and', 'True', 'Herschrijven', 'met', 'in', 'Z', 'op']
+
 class Lexer:
     def __init__(self, text):
         self.text = text
@@ -164,9 +169,13 @@ class Parser:
                 self.expect('in')
                 j = int(self.expect('number'))
                 justification = ('Herschrijven', i, j)
-            elif self.tokenType == 'Tautologie':
+            elif self.tokenType == 'Z':
                 self.eat()
-                justification = ('Tautologie',)
+                i = None
+                if self.tokenType == 'op':
+                    self.eat()
+                    i = int(self.expect('number'))
+                justification = ('Z', i)
             else:
                 self.error('Justification keyword not supported')
         else:
@@ -193,21 +202,6 @@ def get_rewrites(e, lhs, rhs):
             for e2 in get_rewrites(e[2], lhs, rhs):
                 rewrites.append((e[0], e1, e2))
     return rewrites
-
-text = '''
-assert 0 <= n and i == 0
-assert i <= n # Herschrijven met 2 in 1
-
-assert i == 0
-assert i == 0 and 1 <= 0 + 1 # Tautologie
-assert 1 <= i + 1 # Herschrijven met 1 in 2
-'''
-lexer = Lexer(text)
-while True:
-    token = lexer.next_token()
-    print("'%s': '%s'" % (token, lexer.get_token_value()))
-    if token == 'EOF':
-        break
 
 class ProofError(Exception):
     pass
@@ -267,11 +261,42 @@ def is_tautology(e):
         return False
     poly = get_poly(('-', e[2], e[1]))
     if e[0] == '==':
-        return poly == {(): 0}
+        return poly == {}
     elif e[0] == '<=':
         return set(poly.keys()) == set() or set(poly.keys()) == {()} and 0 <= poly[()]
     else:
         return set(poly.keys()) == {()} and 0 < poly[()]
+
+def get_polyc(eq):
+    poly = get_poly(('-', eq[2], eq[1]))
+    c = Fraction(0)
+    if () in poly:
+        c = Fraction(poly[()])
+        del poly[()]
+    op = eq[0]
+    if op == '<':
+        c -= 1
+        op = '<='
+    if poly != {}:
+        gcd = math.gcd(*poly.values())
+        if op == '==' and poly[min(poly.keys())] < 0:
+            gcd *= -1
+        for key in list(poly.keys()):
+            poly[key] /= gcd
+        c /= gcd
+    return op, c, poly
+
+def follows_in_Z_from(consequent, antecedent):
+    if not {consequent[0], antecedent[0]} <= {'==', '<=', '<'}:
+        return False
+    if consequent[0] == '==' and antecedent[0] != '==':
+        return False
+    op1, c1, poly1 = get_polyc(antecedent)
+    op2, c2, poly2 = get_polyc(consequent)
+    print('Checking entailment in Z: %s ==> %s' % ((op1, c1, poly1), (op2, c2, poly2)))
+    if op2 == '==':
+        return (c2, poly2) == (c1, poly1)
+    return poly2 == poly1 and c1 <= c2
 
 def check_entailment(line, antecedent, consequent, justification):
     def get_conjunct(i):
@@ -291,10 +316,18 @@ def check_entailment(line, antecedent, consequent, justification):
         for conjunct in consequent:
             if not (conjunct in antecedent or conjunct in rewrites):
                 raise ProofError("Conjunct niet bewezen: " + str(conjunct) + " (rewrites = " + str(rewrites) + ")")
-    elif justification[0] == 'Tautologie':
-        for conjunct in consequent:
-            if not (conjunct in antecedent or is_tautology(conjunct)):
-                raise ProofError("Conjunct niet bewezen: " + str(conjunct))
+    elif justification[0] == 'Z':
+        if justification[1] == None:
+            for conjunct in consequent:
+                if not (conjunct in antecedent or is_tautology(conjunct)):
+                    raise ProofError("Conjunct niet bewezen: " + str(conjunct))
+        else:
+            antecedent_conjunct = get_conjunct(justification[1])
+            for conjunct in consequent:
+                if not (conjunct in antecedent or follows_in_Z_from(conjunct, antecedent_conjunct)):
+                    raise ProofError("Conjunct niet bewezen: " + str(conjunct))
+
+
     else:
         raise ProofError("Verantwoording niet ondersteund: " + str(justification))
 
@@ -311,6 +344,24 @@ def checkProof(proof):
 
         antecedent = consequent
         i += 1
+
+text = '''
+assert 0 <= n and i == 0
+assert i <= n # Herschrijven met 2 in 1
+
+assert i == 0
+assert i == 0 and 1 <= 0 + 1 # Z
+assert 1 <= i + 1 # Herschrijven met 1 in 2
+
+assert i <= n and i < n
+assert i + 1 <= n # Z op 2
+'''
+lexer = Lexer(text)
+while True:
+    token = lexer.next_token()
+    print("'%s': '%s'" % (token, lexer.get_token_value()))
+    if token == 'EOF':
+        break
 
 parser = Parser(text)
 while parser.tokenType != 'EOF':
