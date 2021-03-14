@@ -73,7 +73,7 @@ assert i == n # LeAntisym op 1 en 2
 In deze verantwoording wordt de eerste conjunct `i <= n` van het antecedent opgegeven als overeenkomstige
 conjunct voor de eerste premisse `x <= y` van de wet `LeAntisym`, en de tweede conjunct `n <= i` van het
 antecedent wordt opgegeven als overeenkomstige conjunct voor de tweede premisse `y <= x`.
-Dit verantwoord de nieuwe conjunct `i == n`; dit is de overeekomstige instantiatie van de conclusie van de wet.
+Dit verantwoordt de nieuwe conjunct `i == n`; dit is de overeenkomstige instantiatie van de conclusie van de wet.
 
 ### Herschrijven met wet op i1, i2, ... in j
 
