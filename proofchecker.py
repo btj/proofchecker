@@ -20,7 +20,7 @@ def is_alpha(c):
 def is_digit(c):
     return '0' <= c and c <= '9'
 
-operators = {'!=', '==', '<=', '<', '+', '-', '#', '(', ')', ',', '==>', ':', '[', ']'}
+operators = {'!=', '==', '<=', '<', '+', '-', '#', '(', ')', ',', '==>', ':', '[', ']', '*'}
 operatorPrefixes = set()
 for operator in operators:
     for i in range(1,len(operator) + 1):
@@ -28,8 +28,8 @@ for operator in operators:
 
 keywords = ['assert', 'and', 'True', 'Herschrijven', 'met', 'in', 'Z', 'op', 'Wet', 'not', 'en', 'if', 'else']
 
-binaryOperators = {'==>', 'and', '==', '<=', '<', '+', '-', '!='}
-symmetricBinaryOperators = {'and', '==', '+'}
+binaryOperators = {'==>', 'and', '==', '<=', '<', '+', '-', '!=', '*'}
+symmetricBinaryOperators = {'and', '==', '+', '*'}
 
 unaryOperators = {'not'}
 nullaryOperators = {'True'}
@@ -174,16 +174,26 @@ class Parser:
                     e = ('call', '#subscript', (e, index))
         return e
 
-    def parseAddition(self):
+    def parseMultiplication(self):
         e = self.parseSuffixExpression()
+        while True:
+            if self.tokenType == '*':
+                self.eat()
+                e2 = self.parseSuffixExpression()
+                e = ('*', e, e2)
+            else:
+                return e
+
+    def parseAddition(self):
+        e = self.parseMultiplication()
         while True:
             if self.tokenType == '+':
                 self.eat()
-                e2 = self.parsePrimaryExpression()
+                e2 = self.parseMultiplication()
                 e = ('+', e, e2)
             elif self.tokenType == '-':
                 self.eat()
-                e2 = self.parsePrimaryExpression()
+                e2 = self.parseMultiplication()
                 e = ('-', e, e2)
             else:
                 return e
