@@ -9,9 +9,7 @@ assert i <= n and i < n
 assert i + 1 <= n # Z op 2
 
 assert i <= n and i < n and n - i == oude_variant
-assert i + 1 <= n and n - i == oude_variant # Z op 2
-assert i + 1 <= n and 0 <= n - (i + 1) and n - i == oude_variant # Z op 1
-assert i + 1 <= n and 0 <= n - (i + 1) and n - (i + 1) < n - i and n - i == oude_variant # Z
+assert i + 1 <= n and 0 <= n - (i + 1) < n - i and n - i == oude_variant # Z op 2 of Z
 assert i + 1 <= n and 0 <= n - (i + 1) < oude_variant # Herschrijven met 4 in 3
 
 # Wet Max1: y <= x ==> max(x, y) == x
@@ -53,19 +51,17 @@ assert 1 <= 1 <= len(xs) and xs[0] == max(xs[:1]) # MaxList1 op 2
 
 assert 1 <= i <= len(xs) and max_ == max(xs[:i]) and i < len(xs) and max_ < xs[i]
 assert 1 <= i < len(xs) and max_ == max(xs[:i]) and max_ <= xs[i] # Z op 5
-assert 1 <= i < len(xs) and max_ == max(xs[:i]) and max(xs[:i]) <= xs[i] # Herschrijven met 3 in 4
-assert 1 <= i < len(xs) and max_ == max(xs[:i]) and xs[i] == max(max(xs[:i]), xs[i]) # Max2 op 4
-assert 1 <= i < len(xs) and max_ == max(xs[:i]) and xs[i] == max(xs[:i + 1]) # Herschrijven met MaxList2 op 1 en 2 in 4
-assert 1 <= i and i + 1 <= len(xs) and xs[i] == max(xs[:i + 1]) # Z op 2
-assert 1 <= i + 1 <= len(xs) and xs[i] == max(xs[:i + 1]) # Z op 1
+assert 1 <= i < len(xs) and max(xs[:i]) <= xs[i] # Herschrijven met 3 in 4
+assert 1 <= i < len(xs) and xs[i] == max(max(xs[:i]), xs[i]) # Max2 op 3
+assert 1 <= i < len(xs) and xs[i] == max(xs[:i + 1]) # Herschrijven met MaxList2 op 1 en 2 in 3
+assert 1 <= i + 1 <= len(xs) and xs[i] == max(xs[:i + 1]) # Z op 1 of Z op 2
 
 assert 1 <= i <= len(xs) and max_ == max(xs[:i]) and i < len(xs) and not max_ < xs[i]
 assert 1 <= i < len(xs) and max_ == max(xs[:i]) and xs[i] <= max_ # Z op 5
 assert 1 <= i < len(xs) and max_ == max(xs[:i]) and xs[i] <= max(xs[:i]) # Herschrijven met 3 in 4
 assert 1 <= i < len(xs) and max_ == max(max(xs[:i]), xs[i]) # Herschrijven met Max1 op 4 in 3
 assert 1 <= i < len(xs) and max_ == max(xs[:i + 1]) # Herschrijven met MaxList2 op 1 en 2 in 3
-assert 1 <= i + 1 and i < len(xs) and max_ == max(xs[:i + 1]) # Z op 1
-assert 1 <= i + 1 <= len(xs) and max_ == max(xs[:i + 1]) # Z op 2
+assert 1 <= i + 1 <= len(xs) and max_ == max(xs[:i + 1]) # Z op 1 of Z op 2
 
 # Wet SliceFull: xs[:len(xs)] == xs
 
@@ -79,9 +75,7 @@ assert max_ == max(xs) # Herschrijven met SliceFull in 1
 
 assert i <= n and i != n and n - i == oude_variant
 assert i < n and n - i == oude_variant # LeNeqLt op 1 en 2
-assert i + 1 <= n and n - i == oude_variant # Z op 1
-assert i + 1 <= n and 0 <= n - (i + 1) and n - i == oude_variant # Z op 1
-assert i + 1 <= n and 0 <= n - (i + 1) < n - i and n - i == oude_variant # Z
+assert i + 1 <= n and 0 <= n - (i + 1) < n - i and n - i == oude_variant # Z op 1 of Z
 assert i + 1 <= n and 0 <= n - (i + 1) < oude_variant # Herschrijven met 4 in 3
 
 assert i <= n and not i != n

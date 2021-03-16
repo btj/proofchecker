@@ -87,6 +87,23 @@ assert 1 <= i < len(xs) and max_ == max(xs[:i]) and xs[i] == max(max(xs[:i]), xs
 assert 1 <= i < len(xs) and max_ == max(xs[:i]) and xs[i] == max(xs[:i + 1]) # Herschrijven met MaxList2 op 1 en 2 in 4
 ```
 
+### V1 of ... of Vn
+
+Je kan in één stap verschillende verantwoordingen gebruiken om verschillende conjuncts van het consequens te
+verantwoorden, door de verantwoordingen na elkaar op te geven, gescheiden door het woord `of`.
+
+Bijvoorbeeld:
+```python
+assert 1 <= i < len(xs) and max_ == max(xs[:i + 1])
+assert 1 <= i + 1 <= len(xs) and max_ == max(xs[:i + 1]) # Z op 1 of Z op 2
+```
+
+De proof checker kijkt voor elke conjunct van het consequens na of ze ofwel identiek is aan een conjunct van het
+antecedens, ofwel verantwoord wordt door één van de opgegeven verantwoordingen. In dit voorbeeld
+wordt de eerste conjunct, `1 <= i + 1`, van het consequens verantwoord door de verantwoording `Z op 1`
+en de tweede conjunct door de verantwoording `Z op 2`. De derde conjunct is identiek aan de derde conjunct van het
+antecedens.
+
 ## Voorbeelden
 
 Je vindt verantwoordingen voor alle gevolgtrekkingen die voorkomen in het document *Bewijssilhouetten opstellen* en in

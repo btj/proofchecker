@@ -26,7 +26,7 @@ for operator in operators:
     for i in range(1,len(operator) + 1):
         operatorPrefixes.add(operator[:i])
 
-keywords = ['assert', 'and', 'True', 'Herschrijven', 'met', 'in', 'Z', 'op', 'Wet', 'not', 'en', 'if', 'else']
+keywords = ['assert', 'and', 'True', 'Herschrijven', 'met', 'in', 'Z', 'op', 'Wet', 'not', 'en', 'if', 'else', 'of']
 
 binaryOperators = {'==>', 'and', '==', '<=', '<', '+', '-', '!=', '*'}
 symmetricBinaryOperators = {'and', '==', '+', '*'}
@@ -268,30 +268,40 @@ class Parser:
                 arguments.append(self.parseFactSpec())
         return ('law', lawName, tuple(arguments))
 
+    def parsePrimaryJustification(self):
+        if self.tokenType == 'Herschrijven':
+            self.eat()
+            self.expect('met')
+            i = self.parseFactSpec()
+            self.expect('in')
+            j = int(self.expect('number'))
+            return ('Herschrijven', i, j)
+        elif self.tokenType == 'Z':
+            self.eat()
+            i = None
+            if self.tokenType == 'op':
+                self.eat()
+                i = self.parseFactSpec()
+            return ('Z', i)
+        elif self.tokenType == 'identifier':
+            return self.parseFactSpec()
+        else:
+            self.error('Justification keyword not supported')
+
+    def parseJustification(self):
+        justification = self.parsePrimaryJustification()
+        if self.tokenType == 'of':
+            self.eat()
+            return ('of', justification, self.parseJustification())
+        return justification
+
     def parseProofLine(self):
         line, _ = self.tokenLoc
         self.expect('assert')
         e = self.parseExpression()
         if self.tokenType == '#':
             self.eat()
-            if self.tokenType == 'Herschrijven':
-                self.eat()
-                self.expect('met')
-                i = self.parseFactSpec()
-                self.expect('in')
-                j = int(self.expect('number'))
-                justification = ('Herschrijven', i, j)
-            elif self.tokenType == 'Z':
-                self.eat()
-                i = None
-                if self.tokenType == 'op':
-                    self.eat()
-                    i = self.parseFactSpec()
-                justification = ('Z', i)
-            elif self.tokenType == 'identifier':
-                justification = self.parseFactSpec()
-            else:
-                self.error('Justification keyword not supported')
+            justification = self.parseJustification()
         else:
             justification = None
         self.expect('EOL')
@@ -612,38 +622,75 @@ def check_entailment(line, antecedent, consequent, justification):
 
         # print("Checking entailment %s ==> %s" % (antecedent, consequent))
 
-        if justification[0] == 'Herschrijven':
-            _, i, j = justification
-            bindings, equation = get_fact(i)
-            target = get_conjunct(j)
-            if equation[0] != '==':
-                raise ProofError("Kan niet herschrijven met " + str(equation) + " want is geen gelijkheid")
-            rewrites = get_rewrites(target, bindings, equation[1], equation[2])
-            targetBindings = dict((x, ('var', x)) for x in get_free_vars(target))
-            for conjunct in consequent:
-                if not (conjunct in antecedent or any(matches(conjunct, rewrite, targetBindings) for rewrite in rewrites)):
-                    raise ProofError("Conjunct niet bewezen: " + str(conjunct) + " (rewrites = " + str(rewrites) + ")")
-        elif justification[0] == 'Z':
-            if justification[1] == None:
-                for conjunct in consequent:
-                    if not (conjunct in antecedent or is_tautology(normalize_eq(conjunct))):
-                        raise ProofError("Conjunct niet bewezen: " + str(conjunct))
+        def get_entailment_checker(justification):
+            if justification[0] == 'Herschrijven':
+                _, i, j = justification
+                bindings, equation = get_fact(i)
+                target = get_conjunct(j)
+                if equation[0] != '==':
+                    raise ProofError("Kan niet herschrijven met " + str(equation) + " want is geen gelijkheid")
+                rewrites = get_rewrites(target, bindings, equation[1], equation[2])
+                targetBindings = dict((x, ('var', x)) for x in get_free_vars(target))
+                def checker(conjunct):
+                    if any(matches(conjunct, rewrite, targetBindings) for rewrite in rewrites):
+                        return None
+                    else:
+                        return "rewrites = " + str(rewrites) + ")"
+                return checker
+            elif justification[0] == 'Z':
+                if justification[1] == None:
+                    def checker(conjunct):
+                        return None if is_tautology(normalize_eq(conjunct)) else ""
+                    return checker
+                else:
+                    bindings, fact = get_fact(justification[1])
+                    if set(get_free_vars(fact)) != set(bindings.keys()):
+                        raise ProofError("Z justification requires fully instantiated fact. Fact %s under bindings %s has uninstantiated pattern variables" % (fact, bindings))
+                    fact = subst(fact, bindings)
+                    antecedent_conjunct = normalize_eq(fact)
+                    def checker(conjunct):
+                        if follows_in_Z_from(normalize_eq(conjunct), antecedent_conjunct):
+                            return None
+                        else:
+                            return ""
+                    return checker
+            elif justification[0] == 'law':
+                variableBindings, conclusion = get_fact(justification)
+                def checker(conjunct):
+                    if matches(conjunct, conclusion, variableBindings):
+                        return None
+                    else:
+                        return ""
+                return checker
+            elif justification[0] == 'of':
+                checker1 = get_entailment_checker(justification[1])
+                checker2 = get_entailment_checker(justification[2])
+                def checker(conjunct):
+                    failureInfo1 = checker1(conjunct)
+                    if failureInfo1 == None:
+                        return None
+                    else:
+                        failureInfo2 = checker2(conjunct)
+                        if failureInfo2 == None:
+                            return None
+                        else:
+                            failureInfos = []
+                            if failureInfo1 != "":
+                                failureInfos.append(failureInfo1)
+                            if failureInfo2 != "":
+                                failureInfos.append(failureInfo2)
+                            return "; ".join(failureInfos)
+                return checker
             else:
-                bindings, fact = get_fact(justification[1])
-                if set(get_free_vars(fact)) != set(bindings.keys()):
-                    raise ProofError("Z justification requires fully instantiated fact. Fact %s under bindings %s has uninstantiated pattern variables" % (fact, bindings))
-                fact = subst(fact, bindings)
-                antecedent_conjunct = normalize_eq(fact)
-                for conjunct in consequent:
-                    if not (conjunct in antecedent or follows_in_Z_from(normalize_eq(conjunct), antecedent_conjunct)):
-                        raise ProofError("Conjunct niet bewezen: " + str(conjunct))
-        elif justification[0] == 'law':
-            variableBindings, conclusion = get_fact(justification)
-            for conjunct in consequent:
-                if not (conjunct in antecedent or matches(conjunct, conclusion, variableBindings)):
-                    raise ProofError("Conjunct niet bewezen: " + str(conjunct))
-        else:
-            raise ProofError("Verantwoording niet ondersteund: " + str(justification))
+                raise ProofError("Verantwoording niet ondersteund: " + str(justification))
+
+        checker = get_entailment_checker(justification)
+        for conjunct in consequent:
+            if conjunct not in antecedent:
+                checkerFailureInfo = checker(conjunct)
+                if checkerFailureInfo != None:
+                    raise ProofError("Conjunct niet bewezen: " + str(conjunct) + ("" if checkerFailureInfo == "" else " (" + checkerFailureInfo + ")"))
+
     except ProofError as e:
         e.loc = (line, (line[0],-1))
         raise e
