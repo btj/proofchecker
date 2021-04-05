@@ -15,10 +15,10 @@ class ParseError(LocError):
         self.loc = loc
 
 def is_alpha(c):
-    return 'A' <= c and c <= 'Z' or 'a' <= c and c <= 'z' or c == '_'
+    return 'A' <= c <= 'Z' or 'a' <= c <= 'z' or c == '_'
 
 def is_digit(c):
-    return '0' <= c and c <= '9'
+    return '0' <= c <= '9'
 
 operators = {'!=', '==', '<=', '<', '+', '-', '#', '(', ')', ',', '==>', ':', '[', ']', '*'}
 operatorPrefixes = set()
